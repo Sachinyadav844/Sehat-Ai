@@ -1,5 +1,7 @@
-import Redis from 'ioredis';
+import IORedis from 'ioredis';
 import { config } from '../config/index.js';
+
+const Redis = (IORedis as any).default ?? IORedis;
 
 export const redisClient = new Redis(config.redisUrl);
 
