@@ -33,6 +33,34 @@ services:
       timeout: 5s
       retries: 5
 
+  mongodb:
+    image: mongo:6.0
+    restart: always
+    container_name: sehat-mongodb
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: always
+    container_name: sehat-qdrant
+    ports:
+      - '6333:6333'
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -72,8 +100,16 @@ services:
     ports:
       - '8000:8000'
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-    healthcheck:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}      - REDIS_URL=redis://redis:6379
+      - MONGO_URL=mongodb://mongodb:27017/sehat
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy    healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
@@ -95,3 +131,5 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  mongodb-data:
+  qdrant-data:

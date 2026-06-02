@@ -128,3 +128,76 @@ model VectorDocument {
   embedding   Bytes?
   createdAt   DateTime @default(now())
 }
+
+model PatientProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  medicalHistory String?
+  allergies      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model SafetyAlert {
+  id             String   @id @default(uuid())
+  consultationId String?
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+  type           String
+  message        String
+  severity       String
+  status         String   @default("open")
+  createdAt      DateTime @default(now())
+}
+
+model MedicalReport {
+  id             String   @id @default(uuid())
+  consultationId String?
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+  title          String
+  summary        String
+  riskLevel      String?
+  pdfUrl         String?
+  createdAt      DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  payload   Json?
+  createdAt DateTime @default(now())
+}
+
+model VideoSession {
+  id             String   @id @default(uuid())
+  consultationId String?
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+  sessionUrl     String?
+  status         String   @default("pending")
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime @default(now())
+}
+
+model RiskScore {
+  id             String   @id @default(uuid())
+  consultationId String   @unique
+  consultation   Consultation @relation(fields: [consultationId], references: [id])
+  score          Float
+  level          String
+  confidence     Float
+  details        String?
+  createdAt      DateTime @default(now())
+}
+
+model EmergencyCase {
+  id             String   @id @default(uuid())
+  consultationId String?
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+  description    String
+  severity       String
+  outcome        String?
+  reportedAt     DateTime @default(now())
+}
