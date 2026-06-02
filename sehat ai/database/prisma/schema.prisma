@@ -1,0 +1,130 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  name      String?
+  age       Int?
+  gender    String?
+  language  String   @default("en")
+  phone     String?  @unique
+  email     String   @unique
+  password  String
+  role      String   @default("patient")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  consultations Consultation[]
+  appointments Appointment[]
+}
+
+model Consultation {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id])
+  symptoms       String?
+  severity       String?
+  emergencyLevel String?       @default("normal")
+  transcript     String?
+  reportUrl      String?
+  status         String        @default("initialized")
+  language       String        @default("en")
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime      @default(now())
+  agentMemories  AgentMemory[]
+  reports        Report[]
+  appointments   Appointment[]
+  emergencyEvents EmergencyEvent[]
+}
+
+model AgentMemory {
+  id             String   @id @default(uuid())
+  consultationId String
+  consultation   Consultation @relation(fields: [consultationId], references: [id])
+  agentName      String
+  input          String
+  output         String
+  confidence     Float    @default(0)
+  timestamp      DateTime @default(now())
+}
+
+model Report {
+  id             String   @id @default(uuid())
+  consultationId String
+  consultation   Consultation @relation(fields: [consultationId], references: [id])
+  summary        String
+  medications    String?
+  riskLevel      String?
+  generatedAt    DateTime @default(now())
+  pdfUrl         String?
+}
+
+model Appointment {
+  id             String        @id @default(uuid())
+  appointmentId  String        @unique @default(uuid())
+  hospitalId     String?
+  doctorId       String?
+  userId         String?
+  consultationId String?
+  user           User?         @relation(fields: [userId], references: [id])
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+  bookingTime    DateTime
+  status         String        @default("booked")
+  createdAt      DateTime      @default(now())
+}
+
+model Hospital {
+  id                String   @id @default(uuid())
+  hospitalId        String   @unique @default(uuid())
+  hospitalName      String
+  location          String
+  specialties       String?
+  emergencyAvailable Boolean @default(false)
+  contact           String?
+  createdAt         DateTime @default(now())
+  doctors           Doctor[]
+}
+
+model Doctor {
+  id          String   @id @default(uuid())
+  name        String
+  specialty   String
+  hospitalId  String
+  hospital    Hospital @relation(fields: [hospitalId], references: [id])
+  contact     String?
+  createdAt   DateTime @default(now())
+}
+
+model Disease {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  category    String
+  description String
+  severity    String
+  createdAt   DateTime @default(now())
+}
+
+model EmergencyEvent {
+  id             String   @id @default(uuid())
+  consultationId String
+  consultation   Consultation @relation(fields: [consultationId], references: [id])
+  type           String
+  message        String
+  resolved       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}
+
+model VectorDocument {
+  id          String   @id @default(uuid())
+  source      String
+  metadata    Json?
+  content     String
+  embedding   Bytes?
+  createdAt   DateTime @default(now())
+}
