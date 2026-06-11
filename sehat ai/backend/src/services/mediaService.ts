@@ -144,7 +144,7 @@ export class AudioStreamProcessor {
   }
 
   getBuffer(): Buffer {
-    return Buffer.concat(this.chunkBuffer);
+    return Buffer.concat(this.chunkBuffer as readonly Uint8Array[]);
   }
 
   clearBuffer() {

@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { prisma } from '../database/client.js';
 import { AIOrchestratorService } from '../services/aiOrchestratorService.js';
+import { config } from '../config/index.js';
 
-const orchestrator = new AIOrchestratorService('http://localhost:8000');
+const orchestrator = new AIOrchestratorService(config.aiServiceUrl);
 
 export async function generateReport(req: Request, res: Response) {
   try {

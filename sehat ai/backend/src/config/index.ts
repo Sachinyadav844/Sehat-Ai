@@ -17,7 +17,7 @@ if (envPath) {
 }
 
 export const config = {
-  port: Number(process.env.PORT || 4000),
+  port: Number(process.env.PORT || 5000),
   jwtSecret: process.env.JWT_SECRET || 'secret',
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'refresh_secret',
   databaseUrl: process.env.DATABASE_URL || '',
@@ -31,6 +31,7 @@ export const config = {
     avatarId: process.env.TRUGEN_AVATAR_ID || '',
     region: process.env.TRUGEN_REGION || '',
   },
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
   aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:8000',
   aiGatewayUrl: process.env.AI_GATEWAY_URL || process.env.AI_SERVICE_URL || 'http://localhost:8000',
   s3: {

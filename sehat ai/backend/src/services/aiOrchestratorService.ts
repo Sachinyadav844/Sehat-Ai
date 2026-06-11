@@ -19,199 +19,121 @@ export interface OrchestrationResult {
   emergencyMessage?: string;
 }
 
+interface OrchestratorWorkflowResult {
+  workflowId: string;
+  sessionId: string;
+  conversationId: string;
+  language: string;
+  workflowStatus: string;
+  activeAgent?: string;
+  workflowHistory?: unknown[];
+  response?: {
+    summary?: string;
+    symptoms?: Array<Symptom | string>;
+    risk?: string;
+    riskScore?: number;
+    confidence?: string;
+    recommendation?: string;
+    recommendations?: string[];
+    nextAction?: string;
+    emergencyMessage?: string;
+    safetyIssues?: string[];
+    metadata?: Record<string, unknown>;
+  };
+  emergencyDetected?: boolean;
+}
+
 export class AIOrchestratorService {
   private aiServiceUrl: string;
   private agentResponses: Map<string, AgentResponse[]> = new Map();
 
   constructor(aiServiceUrl: string = 'http://localhost:8000') {
-    this.aiServiceUrl = aiServiceUrl;
+    this.aiServiceUrl = aiServiceUrl.replace(/\/$/, '');
   }
 
   async orchestrateConsultation(context: ConversationContext): Promise<OrchestrationResult> {
     try {
-      // Step 1: Extract symptoms using AI
-      const symptoms = await this.extractSymptoms(context);
+      const requestPayload = {
+        sessionId: context.consultationId,
+        conversationId: context.consultationId,
+        language: context.language,
+        input:
+          context.history.length > 0
+            ? context.history.map((entry) => `${entry.speaker}: ${entry.text}`).join('\n')
+            : context.consultationId,
+        metadata: {
+          conversationHistory: context.history.map((entry) => ({
+            speaker: entry.speaker,
+            text: entry.text,
+            timestamp: entry.timestamp,
+          })),
+        },
+      };
 
-      // Step 2: Assess severity and risk
-      const riskAssessment = await this.assessRisk(symptoms, context);
-
-      // Step 3: Check for safety issues
-      const safetyCheck = await this.checkSafety(context, symptoms, riskAssessment);
-
-      // Step 4: Generate recommendations
-      const recommendations = await this.generateRecommendations(symptoms, riskAssessment, context);
-
-      // Store agent logs
-      await this.storeAgentLogs(context.consultationId, {
-        symptoms,
-        riskAssessment,
-        safetyCheck,
-        recommendations,
+      const response = await axios.post<OrchestratorWorkflowResult>(`${this.aiServiceUrl}/process`, requestPayload, {
+        timeout: 15000,
       });
 
-      return {
-        symptoms,
-        riskAssessment,
-        safetyIssues: safetyCheck.issues,
-        recommendations,
-        nextAction: safetyCheck.shouldEscalate ? 'emergency-escalation' : 'appointment-booking',
-        shouldEscalate: safetyCheck.shouldEscalate,
-        emergencyMessage: safetyCheck.emergencyMessage,
-      };
+      const workflowResult = response.data;
+      await this.storeAgentLogs(context.consultationId, {
+        request: requestPayload,
+        workflowResult,
+      });
+
+      return this.mapWorkflowResult(workflowResult);
     } catch (error) {
       console.error('Orchestration Error:', error);
       throw error;
     }
   }
 
-  private async extractSymptoms(context: ConversationContext): Promise<Symptom[]> {
-    try {
-      const response = await axios.post(`${this.aiServiceUrl}/agents/symptom`, {
-        text: context.history.map(t => t.text).join(' '),
-        language: context.language,
-        consultationId: context.consultationId,
-      });
+  private mapWorkflowResult(workflowResult: OrchestratorWorkflowResult): OrchestrationResult {
+    const response = workflowResult.response || {};
+    const symptoms: Symptom[] = Array.isArray(response.symptoms)
+      ? response.symptoms.map((value) => {
+          if (typeof value === 'string') {
+            return { id: '', name: value };
+          }
+          return {
+            id: (value as Symptom).id || '',
+            name: (value as Symptom).name || String(value),
+            duration: (value as Symptom).duration,
+            severity: (value as Symptom).severity,
+            reported: (value as Symptom).reported,
+          };
+        })
+      : [];
 
-      return response.data.symptoms || [];
-    } catch (error) {
-      console.error('Symptom Extraction Error:', error);
-      return [];
-    }
+    const riskAssessment: RiskAssessment = {
+      riskScore: typeof response.riskScore === 'number' ? response.riskScore : 0,
+      level: typeof response.risk === 'string' ? (response.risk as RiskAssessment['level']) : 'low',
+      confidence: response.confidence ? Number(response.confidence) || 0 : 0,
+      details:
+        typeof response?.metadata?.details === 'string'
+          ? (response.metadata.details as string)
+          : undefined,
+    };
+
+    const recommendations = Array.isArray(response.recommendations)
+      ? response.recommendations
+      : response.recommendation
+      ? [response.recommendation]
+      : [];
+
+    return {
+      symptoms,
+      riskAssessment,
+      safetyIssues: Array.isArray(response.safetyIssues) ? response.safetyIssues : [],
+      recommendations,
+      nextAction:
+        response.nextAction ??
+        (workflowResult.emergencyDetected ? 'emergency-escalation' : 'appointment-booking'),
+      shouldEscalate: workflowResult.emergencyDetected ?? false,
+      emergencyMessage: response.emergencyMessage,
+    };
   }
 
-  private async assessRisk(symptoms: Symptom[], context: ConversationContext): Promise<RiskAssessment> {
-    try {
-      const response = await axios.post(`${this.aiServiceUrl}/agents/severity`, {
-        symptoms,
-        consultationId: context.consultationId,
-        language: context.language,
-      });
-
-      return {
-        riskScore: response.data.score || 0,
-        level: response.data.level || 'low',
-        confidence: response.data.confidence || 0.5,
-        details: response.data.details,
-      };
-    } catch (error) {
-      console.error('Risk Assessment Error:', error);
-      return {
-        riskScore: 0,
-        level: 'low',
-        confidence: 0,
-      };
-    }
-  }
-
-  private async checkSafety(
-    context: ConversationContext,
-    symptoms: Symptom[],
-    riskAssessment: RiskAssessment
-  ): Promise<{
-    issues: string[];
-    shouldEscalate: boolean;
-    emergencyMessage?: string;
-  }> {
-    try {
-      const response = await axios.post(`${this.aiServiceUrl}/agents/safety`, {
-        text: context.history.map(t => t.text).join(' '),
-        symptoms,
-        riskLevel: riskAssessment.level,
-        consultationId: context.consultationId,
-        language: context.language,
-      });
-
-      return {
-        issues: response.data.issues || [],
-        shouldEscalate: response.data.escalate || false,
-        emergencyMessage: response.data.message,
-      };
-    } catch (error) {
-      console.error('Safety Check Error:', error);
-      return {
-        issues: [],
-        shouldEscalate: false,
-      };
-    }
-  }
-
-  private async generateRecommendations(
-    symptoms: Symptom[],
-    riskAssessment: RiskAssessment,
-    context: ConversationContext
-  ): Promise<string[]> {
-    try {
-      // Get hospital recommendations
-      const hospitals = await this.findHospitals(symptoms, riskAssessment, context);
-
-      // Generate appointment recommendations
-      const appointments = await this.generateAppointmentAdvice(symptoms, context);
-
-      // Generate general advice
-      const advice = await this.generateMedicalAdvice(symptoms, context);
-
-      return [
-        ...advice,
-        ...appointments,
-        ...(hospitals.length > 0 ? [`Visit nearby hospital: ${hospitals[0].name}`] : []),
-      ];
-    } catch (error) {
-      console.error('Recommendation Generation Error:', error);
-      return [];
-    }
-  }
-
-  private async findHospitals(
-    symptoms: Symptom[],
-    riskAssessment: RiskAssessment,
-    context: ConversationContext
-  ): Promise<any[]> {
-    try {
-      const response = await axios.post(`${this.aiServiceUrl}/agents/hospital`, {
-        symptoms,
-        riskLevel: riskAssessment.level,
-        consultationId: context.consultationId,
-        language: context.language,
-      });
-
-      return response.data.hospitals || [];
-    } catch (error) {
-      console.error('Hospital Finding Error:', error);
-      return [];
-    }
-  }
-
-  private async generateAppointmentAdvice(symptoms: Symptom[], context: ConversationContext): Promise<string[]> {
-    try {
-      const response = await axios.post(`${this.aiServiceUrl}/agents/appointment`, {
-        symptoms,
-        consultationId: context.consultationId,
-        language: context.language,
-      });
-
-      return response.data.advice || [];
-    } catch (error) {
-      console.error('Appointment Advice Error:', error);
-      return [];
-    }
-  }
-
-  private async generateMedicalAdvice(symptoms: Symptom[], context: ConversationContext): Promise<string[]> {
-    try {
-      const response = await axios.post(`${this.aiServiceUrl}/agents/advice`, {
-        symptoms,
-        consultationId: context.consultationId,
-        language: context.language,
-      });
-
-      return response.data.advice || [];
-    } catch (error) {
-      console.error('Medical Advice Error:', error);
-      return [];
-    }
-  }
-
-  private async storeAgentLogs(consultationId: string, data: any): Promise<void> {
+  private async storeAgentLogs(consultationId: string, data: unknown): Promise<void> {
     try {
       await prisma.agentLog.create({
         data: {

@@ -12,14 +12,33 @@ import { reportRouter } from './routes/reports.js';
 import { emergencyRouter } from './routes/emergency.js';
 import { ragRouter } from './routes/rag.js';
 import { medicalRouter } from './routes/medical.js';
-import { prisma } from './database/client.js';
 import { healthRouter } from './routes/health.routes.js';
 import { languageMiddleware } from './middleware/language.js';
+import { config } from './config/index.js';
 
 const app = express();
 
+const allowedOrigins = [
+  config.frontendUrl,
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://localhost:3000',
+].filter(Boolean);
+
 app.use(helmet());
-app.use(cors());
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+      return callback(null, allowedOrigins.includes(origin));
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+  }),
+);
 app.use(json({ limit: '50mb' }));
 app.use(morgan('combined'));
 
@@ -28,7 +47,16 @@ app.use(rateLimit({ windowMs: 1000 * 60, max: 300 }));
 // language detection for incoming API requests
 app.use(languageMiddleware);
 
+app.get('/', (_req, res) => {
+  res.json({
+    name: 'SehatAI Backend',
+    status: 'running',
+    version: '1.0.0',
+  });
+});
+
 app.use('/health', healthRouter);
+app.use('/api/health', healthRouter);
 
 app.use('/api/auth', authRouter);
 app.use('/api/consultation', consultationRouter);

@@ -1,45 +1,116 @@
+import axios from 'axios';
 import { Router } from 'express';
 import { prisma } from '../database/client.js';
-import { Redis } from 'ioredis';
+import { redisClient } from '../database/redisClient.js';
 import { config } from '../config/index.js';
 
 export const healthRouter = Router();
 
-healthRouter.get('/', async (req, res) => {
-  const result: any = { ok: true, uptime: process.uptime() };
+const checkEndpoint = async (url: string) => {
+  try {
+    const response = await axios.get(`${url.replace(/\/$/, '')}/health`, { timeout: 3000 });
+    return {
+      healthy: response.status >= 200 && response.status < 300,
+      statusCode: response.status,
+      details: response.data,
+    };
+  } catch (error) {
+    return {
+      healthy: false,
+      statusCode: (error as any)?.response?.status || 503,
+      details: (error as Error).message,
+    };
+  }
+};
 
-  // Check database
+healthRouter.get('/', async (_req, res) => {
+  const healthStatus = {
+    status: 'healthy',
+    server: 'running',
+    database: 'connected',
+    agents: 'unknown',
+    rag: 'unknown',
+  };
+
   try {
     await prisma.$queryRaw`SELECT 1`;
-    result.database = { ok: true };
   } catch (err) {
-    result.database = { ok: false, error: String(err) };
-    result.ok = false;
+    healthStatus.status = 'unhealthy';
+    healthStatus.database = 'disconnected';
   }
 
-  // Check redis
   try {
-    const r = new Redis(config.redisUrl);
-    const pong = await r.ping();
-    await r.quit();
-    result.redis = { ok: pong === 'PONG' };
-    if (pong !== 'PONG') result.ok = false;
+    const pong = await redisClient.ping();
+    if (pong !== 'PONG') {
+      healthStatus.status = 'unhealthy';
+      healthStatus.database = 'disconnected';
+    }
   } catch (err) {
-    result.redis = { ok: false, error: String(err) };
-    result.ok = false;
+    healthStatus.status = 'unhealthy';
+    healthStatus.database = 'disconnected';
   }
 
-  // Check AI config
+  const agentHealth = await checkEndpoint(config.aiGatewayUrl || config.aiServiceUrl);
+  healthStatus.agents = agentHealth.healthy ? 'healthy' : 'unhealthy';
+
+  const ragHealth = await checkEndpoint(config.aiServiceUrl);
+  healthStatus.rag = ragHealth.healthy ? 'healthy' : 'unhealthy';
+
+  if (!agentHealth.healthy || !ragHealth.healthy || healthStatus.database === 'disconnected') {
+    healthStatus.status = 'unhealthy';
+  }
+
+  return res.json({
+    ...healthStatus,
+    agentHealth,
+    ragHealth,
+  });
+});
+
+healthRouter.get('/agents', async (_req, res) => {
+  const agentCheck = await checkEndpoint(config.aiGatewayUrl || config.aiServiceUrl);
+  return res.json({
+    service: config.aiGatewayUrl || config.aiServiceUrl,
+    healthy: agentCheck.healthy,
+    statusCode: agentCheck.statusCode,
+    details: agentCheck.details,
+  });
+});
+
+healthRouter.get('/rag', async (_req, res) => {
+  const ragCheck = await checkEndpoint(config.aiServiceUrl);
+  return res.json({
+    service: config.aiServiceUrl,
+    healthy: ragCheck.healthy,
+    statusCode: ragCheck.statusCode,
+    details: ragCheck.details,
+  });
+});
+
+healthRouter.get('/database', async (_req, res) => {
+  const status = {
+    healthy: true,
+    database: 'connected',
+    redis: 'connected',
+  };
+
   try {
-    result.ai = { ok: Boolean(config.openaiKey || config.trugen.apiKey) };
-    if (!result.ai.ok) result.ok = false;
+    await prisma.$queryRaw`SELECT 1`;
   } catch (err) {
-    result.ai = { ok: false, error: String(err) };
-    result.ok = false;
+    status.healthy = false;
+    status.database = 'disconnected';
   }
 
-  // websocket (best-effort)
-  result.websocket = { ok: true };
+  try {
+    const pong = await redisClient.ping();
+    if (pong !== 'PONG') {
+      status.healthy = false;
+      status.redis = 'disconnected';
+    }
+  } catch (err) {
+    status.healthy = false;
+    status.redis = 'disconnected';
+  }
 
-  res.json(result);
+  return res.json(status);
 });
